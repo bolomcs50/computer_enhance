@@ -130,6 +130,11 @@ def data_to_accumulator(b1, bytes: bytearray):
     accumulator = "ax" if w else "al"
     return accumulator, value
 
+def ip_inc8(bytes: bytearray):
+    increment = int.from_bytes(bytes[:1], "little", signed=True)
+    del bytes[:1]
+    return increment
+
 def parse(bytes: bytearray):
     output = ["bits 16"]
     while len(bytes):
@@ -185,9 +190,91 @@ def parse(bytes: bytearray):
             acc, value = data_to_accumulator(b1, bytes)
             output.append(f"cmp {acc}, {value}")
             
+        elif b1 == 0b01110101: # JNZ: Jump if not equal/zero
+            inc8 = ip_inc8(bytes)
+            output.append(f"jnz {inc8}")
+        
+        elif b1 == 0b01110100: # JE: Jump if equal/zero
+            inc8 = ip_inc8(bytes)
+            output.append(f"je {inc8}")
+
+        elif b1 == 0b01111100: # JL: Jump on less
+            inc8 = ip_inc8(bytes)
+            output.append(f"jl {inc8}")
+        
+        elif b1 == 0b01111110: # JLE: Jump on less or equal
+            inc8 = ip_inc8(bytes)
+            output.append(f"jle {inc8}")
+        
+        elif b1 == 0b01110010: # JB: Jump on below
+            inc8 = ip_inc8(bytes)
+            output.append(f"jb {inc8}")
+        
+        elif b1 == 0b01110110: # JBE: Jump on below or equal
+            inc8 = ip_inc8(bytes)
+            output.append(f"jbe {inc8}")
+                                
+        elif b1 == 0b01111010: # JP: Jump on parity
+            inc8 = ip_inc8(bytes)
+            output.append(f"jp {inc8}")
+        
+        elif b1 == 0b01110000: # JO: Jump on overflow
+            inc8 = ip_inc8(bytes)
+            output.append(f"jo {inc8}")
+        
+        elif b1 == 0b01111000: # JS: Jump on sign
+            inc8 = ip_inc8(bytes)
+            output.append(f"js {inc8}")
+                    
+        elif b1 == 0b01111101: # JNL: Jump on not less
+            inc8 = ip_inc8(bytes)
+            output.append(f"jnl {inc8}")
+                    
+        elif b1 == 0b01111111: # JG: Jump on greater
+            inc8 = ip_inc8(bytes)
+            output.append(f"jg {inc8}")
+                    
+        elif b1 == 0b01110011: # JNB: Jump on not below
+            inc8 = ip_inc8(bytes)
+            output.append(f"jnb {inc8}")
+                    
+        elif b1 == 0b01110111: # JA: Jump if above
+            inc8 = ip_inc8(bytes)
+            output.append(f"ja {inc8}")
+                    
+        elif b1 == 0b01111011: # JNP: Jump on not par
+            inc8 = ip_inc8(bytes)
+            output.append(f"jnp {inc8}")
+            
+        elif b1 == 0b01110001: # JNO: Jump on not overflow
+            inc8 = ip_inc8(bytes)
+            output.append(f"jno {inc8}")
+
+        elif b1 == 0b01111001: # JNS: Jump on not sign
+            inc8 = ip_inc8(bytes)
+            output.append(f"jns {inc8}")
+
+        elif b1 == 0b11100010: # Loop CX times
+            inc8 = ip_inc8(bytes)
+            output.append(f"loop {inc8}")
+
+        elif b1 == 0b11100001: # Loop while zero
+            inc8 = ip_inc8(bytes)
+            output.append(f"loopz {inc8}")
+
+        elif b1 == 0b11100000: # Loop while nonzero
+            inc8 = ip_inc8(bytes)
+            output.append(f"loopnz {inc8}")
+
+        elif b1 == 0b11100011: # Jump on CX zero
+            inc8 = ip_inc8(bytes)
+            output.append(f"jcxz {inc8}")
+
+                    
         else:
             print(f"Unknown instruction {b1:08b}")
             output.append(f"UNK {b1:08b}")
+            bytes.pop(0)
     return output
 
 def decode(file):
