@@ -87,6 +87,8 @@ def mod_opcode_rm_to_dest_width_value(b1, bytes:bytearray, s_for_width = False):
     mod = b2 >> 6
     opcode = b2 >> 3 & 0b111
     rm = b2 & 0b111
+    if opcode not in opcode_to_op.keys():
+        return None, None, None, None
     operation = opcode_to_op[opcode]
     displacement = None
     if (mod == 0b00 and rm == 0b110) or mod == 0b01 or mod == 0b10:
@@ -168,7 +170,11 @@ def parse(bytes: bytearray):
         
         elif b1 >> 2 == 0b100000: # ADD/SUB/CMP immediate to register/memory
             dest, width, value, opcode = mod_opcode_rm_to_dest_width_value(b1, bytes, True)
-            output.append(f"{opcode} {width if width else ""}{dest}, {value}")
+            if dest:
+                output.append(f"{opcode} {width if width else ""}{dest}, {value}")
+            else:
+                print(f"Unknown instruction {b1:08b}")
+                output.append(f"UNK {b1:08b}")
             
         elif b1 >> 1 == 0b0000010: # ADD immediate to accumulator
             acc, value = data_to_accumulator(b1, bytes)
@@ -269,12 +275,11 @@ def parse(bytes: bytearray):
         elif b1 == 0b11100011: # Jump on CX zero
             inc8 = ip_inc8(bytes)
             output.append(f"jcxz {inc8}")
-
-                    
+ 
         else:
             print(f"Unknown instruction {b1:08b}")
             output.append(f"UNK {b1:08b}")
-            bytes.pop(0)
+            
     return output
 
 def decode(file):
