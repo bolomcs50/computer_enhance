@@ -103,8 +103,11 @@ def mod_opcode_rm_to_dest_width_value(b1, bytes:bytearray, s_for_width = False):
         return rm_name, instant_width, value, operation
     else:
         instant_width = "word " if w else "byte "
-        rm_name = rm_to_effective_address[rm]
-        rm_name = format_register_displacement(rm_name, displacement)
+        if mod == 0b00 and rm == 0b110:
+            rm_name = f"[{displacement}]"
+        else:
+            rm_name = rm_to_effective_address[rm]
+            rm_name = format_register_displacement(rm_name, displacement)
     return rm_name, instant_width, value, operation
 
 def mem_to_accumulator(b1, bytes: bytearray):
@@ -158,7 +161,7 @@ def parse(bytes: bytearray):
             dest, source = mod_reg_rm_to_dest_source(b1, bytes)
             output.append(f"add {dest}, {source}")
         
-        elif b1 >> 2 == 0b100000: # ADD/SUB/... immediate to register/memory
+        elif b1 >> 2 == 0b100000: # ADD/SUB/CMP immediate to register/memory
             dest, width, value, opcode = mod_opcode_rm_to_dest_width_value(b1, bytes, True)
             output.append(f"{opcode} {width if width else ""}{dest}, {value}")
             
@@ -177,7 +180,11 @@ def parse(bytes: bytearray):
         elif b1 >> 2 == 0b001110: # CMP reg/memory and register
             dest, source = mod_reg_rm_to_dest_source(b1, bytes)
             output.append(f"cmp {dest}, {source}")
-        
+            
+        elif b1 >> 1 == 0b0011110: # CMP immediate with accumulator
+            acc, value = data_to_accumulator(b1, bytes)
+            output.append(f"cmp {acc}, {value}")
+            
         else:
             print(f"Unknown instruction {b1:08b}")
             output.append(f"UNK {b1:08b}")
