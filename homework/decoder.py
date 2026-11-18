@@ -35,6 +35,44 @@ rm_to_effective_address = {
     0b111 : "bx",
 }
 
+opcode_to_op = {
+    0b000 : "add",
+    0b101 : "sub",
+    0b111 : "cmp"
+}
+
+def mod_reg_rm_to_dest_source(b1, bytes: bytearray):
+    b2 = bytes.pop(0)
+    d = b1 >> 1 & 1
+    w = b1 & 1
+    mod = b2 >> 6
+    reg = b2 >> 3 & 0b111
+    rm = b2 & 0b111
+    reg_name = reg_to_name[w][reg]
+    
+    if mod == 0b11:
+        rm_name = reg_to_name[w][rm]
+        dest = reg_name if d else rm_name
+        source = rm_name if d else reg_name
+        return dest, source
+    
+    if mod == 0b00 and rm == 0b110:
+        value = f"[{int.from_bytes(bytes[:2], "little")}]"
+        del bytes[:2]
+        dest = reg_name if d else value
+        source = value if d else reg_name
+        return dest, source
+    
+    displacement = None
+    if mod == 0b01 or mod == 0b10:
+        disp_length = 1 if mod == 0b01 else 2
+        displacement = int.from_bytes(bytes[:disp_length], "little", signed=True)
+        del bytes[:disp_length]
+    rm_name = format_register_displacement(rm_to_effective_address[rm], displacement)
+    dest = reg_name if d else rm_name
+    source = rm_name if d else reg_name
+    return dest, source
+
 def format_register_displacement(r_name, displacement):
     if not displacement:
         return f"[{r_name}]"
@@ -42,41 +80,63 @@ def format_register_displacement(r_name, displacement):
         return f"[{r_name} + {displacement}]"
     return f"[{r_name} - {abs(displacement)}]"
 
+def mod_opcode_rm_to_dest_width_value(b1, bytes:bytearray, s_for_width = False):
+    s = b1 >> 1 & 1
+    w = b1 & 1
+    b2 = bytes.pop(0)
+    mod = b2 >> 6
+    opcode = b2 >> 3 & 0b111
+    rm = b2 & 0b111
+    operation = opcode_to_op[opcode]
+    displacement = None
+    if (mod == 0b00 and rm == 0b110) or mod == 0b01 or mod == 0b10:
+        disp_width = 1 if mod == 0b01 else 2
+        displacement = int.from_bytes(bytes[:disp_width], "little", signed=True)
+        del bytes[:disp_width]
+    data_width = 2 if (s_for_width and not s and w) or (not s_for_width and w) else 1
+    value = int.from_bytes(bytes[:data_width], "little")
+    del bytes[:data_width]
+    rm_name = None
+    instant_width = None
+    if mod == 0b11:
+        rm_name = reg_to_name[w][rm]
+        return rm_name, instant_width, value, operation
+    else:
+        instant_width = "word " if w else "byte "
+        rm_name = rm_to_effective_address[rm]
+        rm_name = format_register_displacement(rm_name, displacement)
+    return rm_name, instant_width, value, operation
+
+def mem_to_accumulator(b1, bytes: bytearray):
+    d = b1 >> 1 & 1
+    w = b1 & 1
+    width = 2 if w else 1
+    addr = int.from_bytes(bytes[:width], "little")
+    del bytes[:width]
+    accumulator = "ax" if w else "al"
+    addr = f"[{addr}]"
+    if d:
+        return addr, accumulator
+    return accumulator, addr
+
+def data_to_accumulator(b1, bytes: bytearray):
+    w = b1 & 1
+    width = 2 if w else 1
+    value = int.from_bytes(bytes[:width], "little", signed=True)
+    del bytes[:width]
+    accumulator = "ax" if w else "al"
+    return accumulator, value
+
 def parse(bytes: bytearray):
     output = ["bits 16"]
     while len(bytes):
         b1 = bytes.pop(0)
         
-        if b1 >> 2 == 0b100010: # Register/memory to/from register
-            d = b1 >> 1 & 1
-            w = b1 & 1
-            b2 = bytes.pop(0)
-            mod = b2 >> 6
-            reg = b2 >> 3 & 0b111
-            rm = b2 & 0b111
-            reg_name = reg_to_name[w][reg]
-            if mod == 0b11:
-                rm_name = reg_to_name[w][rm]
-                dest = reg_name if d else rm_name
-                source = rm_name if d else reg_name
-                output.append(f"mov {dest}, {source}")
-            elif mod == 0b00 and rm == 0b110:
-                value, bytes = int.from_bytes(bytes[:2], "little"), bytes[2:]
-                dest = reg_name if d else value
-                source = value if d else reg_name
-                output.append(f"mov {dest}, [{source}]")
-                continue
-            else:
-                displacement = None
-                if mod == 0b01 or mod == 0b10:
-                    disp_length = 1 if mod == 0b01 else 2
-                    displacement, bytes = int.from_bytes(bytes[:disp_length], "little", signed=True), bytes[disp_length:]
-                rm_name = format_register_displacement(rm_to_effective_address[rm], displacement)
-                dest = reg_name if d else rm_name
-                source = rm_name if d else reg_name
-                output.append(f"mov {dest}, {source}")
-                
-        elif b1 >> 4 == 0b1011: # Immediate to register
+        if b1 >> 2 == 0b100010: # MOV register/memory to/from register
+            dest, source = mod_reg_rm_to_dest_source(b1, bytes)
+            output.append(f"mov {dest}, {source}")
+
+        elif b1 >> 4 == 0b1011: # MOV immediate to register
             w = b1 >> 3 & 1
             reg = b1 & 0b111
             reg_name = reg_to_name[w][reg]
@@ -86,38 +146,38 @@ def parse(bytes: bytearray):
             arguments += str(value)
             output.append(f"mov {arguments}")
             
-        elif b1 >> 1 == 0b1100011: # Immediate to register/memory
-            w = b1 & 1
-            b2 = bytes.pop(0)
-            mod = b2 >> 6
-            rm = b2 & 0b111
-            displacement = None
-            if (mod == 0b00 and rm == 0b110) or mod == 0b01 or mod == 0b10:
-                disp_width = 1 if mod == 0b01 else 2
-                displacement, bytes = int.from_bytes(bytes[:disp_width], "little", signed=True), bytes[disp_width:]
-            data_width = 2 if w else 1
-            value, bytes = int.from_bytes(bytes[:data_width], "little", signed=True), bytes[data_width:]
-            rm_name = None
-            instant_width = "word" if w else "byte"
-            if mod == 0b11:
-                rm_name = reg_to_name[w][rm]
-                output.append(f"mov {rm_name}, {instant_width} {value}")
-                continue
-            else:
-                rm_name = rm_to_effective_address[rm]
-                rm_name = format_register_displacement(rm_name, displacement)
-            output.append(f"mov {rm_name}, {instant_width} {value}")
+        elif b1 >> 1 == 0b1100011: # MOV immediate to register/memory
+            dest, width, value, _ = mod_opcode_rm_to_dest_width_value(b1, bytes)
+            output.append(f"mov {dest}, {width if width else ""}{value}")
 
-        elif b1 >> 2 == 0b101000: # Memory to accumulator and accumulator to memory
-            d = b1 >> 1 & 1
-            w = b1 & 1
-            width = 2 if w else 1
-            addr, bytes = int.from_bytes(bytes[:width], "little"), bytes[width:]
-            args = f"[{addr}], ax" if d else f"ax, [{addr}]"
-            output.append(f"mov {args}")
+        elif b1 >> 2 == 0b101000: # MOV memory to accumulator and MOV accumulator to memory
+            dest, src = mem_to_accumulator(b1, bytes)
+            output.append(f"mov {dest}, {src}")
 
-        # elif b1 == 0b10001100: # Segment to register/memory
-
+        elif b1 >> 2 == 0b000000: # ADD reg/memory with register to either
+            dest, source = mod_reg_rm_to_dest_source(b1, bytes)
+            output.append(f"add {dest}, {source}")
+        
+        elif b1 >> 2 == 0b100000: # ADD/SUB/... immediate to register/memory
+            dest, width, value, opcode = mod_opcode_rm_to_dest_width_value(b1, bytes, True)
+            output.append(f"{opcode} {width if width else ""}{dest}, {value}")
+            
+        elif b1 >> 1 == 0b0000010: # ADD immediate to accumulator
+            acc, value = data_to_accumulator(b1, bytes)
+            output.append(f"add {acc}, {value}")
+        
+        elif b1 >> 2 == 0b001010: # SUB reg/memory and register to either
+            dest, source = mod_reg_rm_to_dest_source(b1, bytes)
+            output.append(f"sub {dest}, {source}")
+            
+        elif b1 >> 1 == 0b0010110: # SUB immediate from accumulator
+            acc, value = data_to_accumulator(b1, bytes)
+            output.append(f"sub {acc}, {value}")
+        
+        elif b1 >> 2 == 0b001110: # CMP reg/memory and register
+            dest, source = mod_reg_rm_to_dest_source(b1, bytes)
+            output.append(f"cmp {dest}, {source}")
+        
         else:
             print(f"Unknown instruction {b1:08b}")
             output.append(f"UNK {b1:08b}")
