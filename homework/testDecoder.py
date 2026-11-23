@@ -2,12 +2,12 @@ from decoder import decode
 
 ROOT_FOLDER = "/home/michele/git/computer_enhance/perfaware/part1/"
 
+## decoding
 for binFile in ["listing_0037_single_register_mov",
                 "listing_0038_many_register_mov",
                 "listing_0039_more_movs",
                 "listing_0040_challenge_movs",
-                "listing_0041_add_sub_cmp_jnz",
-                "listing_0042_completionist_decode"]:
+                "listing_0041_add_sub_cmp_jnz"]:
     print(f"binary: {binFile}")
     result = decode(ROOT_FOLDER + binFile)
     target = []

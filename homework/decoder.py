@@ -1,28 +1,7 @@
 # Read assembled Intel 8086 binaries and decode them to instructions
 # https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 
-reg_to_name = {
-    0: {
-        0b000 : "al",
-        0b001 : "cl",
-        0b010 : "dl",
-        0b011 : "bl",
-        0b100 : "ah",
-        0b101 : "ch",
-        0b110 : "dh",
-        0b111 : "bh",
-    },
-    1: {
-        0b000 : "ax",
-        0b001 : "cx",
-        0b010 : "dx",
-        0b011 : "bx",
-        0b100 : "sp",
-        0b101 : "bp",
-        0b110 : "si",
-        0b111 : "di",
-    }
-}
+from processor import CPU, Operation, Register
 
 rm_to_effective_address = {
     0b000 : "bx + si",
@@ -36,11 +15,11 @@ rm_to_effective_address = {
 }
 
 opcode_to_op = {
-    0b000 : "add",
-    0b101 : "sub",
-    0b111 : "cmp"
+    0b000 : Operation.ADD,
+    0b101 : Operation.SUB,
+    0b111 : Operation.CMP
 }
-
+    
 def mod_reg_rm_to_dest_source(b1, bytes: bytearray):
     b2 = bytes.pop(0)
     d = b1 >> 1 & 1
@@ -48,19 +27,19 @@ def mod_reg_rm_to_dest_source(b1, bytes: bytearray):
     mod = b2 >> 6
     reg = b2 >> 3 & 0b111
     rm = b2 & 0b111
-    reg_name = reg_to_name[w][reg]
+    register = Register((w,reg))
     
     if mod == 0b11:
-        rm_name = reg_to_name[w][rm]
-        dest = reg_name if d else rm_name
-        source = rm_name if d else reg_name
+        source_reg = Register((w,rm))
+        dest = register if d else source_reg
+        source = source_reg if d else register
         return dest, source
     
     if mod == 0b00 and rm == 0b110:
         value = f"[{int.from_bytes(bytes[:2], "little")}]"
         del bytes[:2]
-        dest = reg_name if d else value
-        source = value if d else reg_name
+        dest = register if d else value
+        source = value if d else register
         return dest, source
     
     displacement = None
@@ -69,8 +48,8 @@ def mod_reg_rm_to_dest_source(b1, bytes: bytearray):
         displacement = int.from_bytes(bytes[:disp_length], "little", signed=True)
         del bytes[:disp_length]
     rm_name = format_register_displacement(rm_to_effective_address[rm], displacement)
-    dest = reg_name if d else rm_name
-    source = rm_name if d else reg_name
+    dest = register if d else rm_name
+    source = rm_name if d else register
     return dest, source
 
 def format_register_displacement(r_name, displacement):
@@ -89,7 +68,7 @@ def mod_opcode_rm_to_dest_width_value(b1, bytes:bytearray, s_for_width = False):
     rm = b2 & 0b111
     if opcode not in opcode_to_op.keys():
         return None, None, None, None
-    operation = opcode_to_op[opcode]
+    operation = opcode_to_op[opcode].name.lower()
     displacement = None
     if (mod == 0b00 and rm == 0b110) or mod == 0b01 or mod == 0b10:
         disp_width = 1 if mod == 0b01 else 2
@@ -101,7 +80,7 @@ def mod_opcode_rm_to_dest_width_value(b1, bytes:bytearray, s_for_width = False):
     rm_name = None
     instant_width = None
     if mod == 0b11:
-        rm_name = reg_to_name[w][rm]
+        rm_name = Register((w,rm)).name.lower()
         return rm_name, instant_width, value, operation
     else:
         instant_width = "word " if w else "byte "
@@ -139,21 +118,26 @@ def ip_inc8(bytes: bytearray):
 
 def parse(bytes: bytearray):
     output = ["bits 16"]
+    cpu = CPU()
+    cpu.printState()
     while len(bytes):
         b1 = bytes.pop(0)
         
         if b1 >> 2 == 0b100010: # MOV register/memory to/from register
             dest, source = mod_reg_rm_to_dest_source(b1, bytes)
-            output.append(f"mov {dest}, {source}")
+            cpu.execute(Operation.MOV, dest, source)
+            output.append(f"mov {dest.name.lower()}, {source.name.lower()}")
 
         elif b1 >> 4 == 0b1011: # MOV immediate to register
             w = b1 >> 3 & 1
             reg = b1 & 0b111
-            reg_name = reg_to_name[w][reg]
+            register = Register((w,reg))
+            reg_name = register.name.lower()
             arguments = f"{reg_name}, "
             data_bytes = 2 if w else 1
             value, bytes = int.from_bytes(bytes[:data_bytes], "little"), bytes[data_bytes:]
             arguments += str(value)
+            cpu.execute(Operation.MOV, register, value)
             output.append(f"mov {arguments}")
             
         elif b1 >> 1 == 0b1100011: # MOV immediate to register/memory
@@ -279,7 +263,8 @@ def parse(bytes: bytearray):
         else:
             print(f"Unknown instruction {b1:08b}")
             output.append(f"UNK {b1:08b}")
-            
+    
+    cpu.printState()        
     return output
 
 def decode(file):
