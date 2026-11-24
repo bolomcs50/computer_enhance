@@ -68,7 +68,7 @@ def mod_opcode_rm_to_dest_width_value(b1, bytes:bytearray, s_for_width = False):
     rm = b2 & 0b111
     if opcode not in opcode_to_op.keys():
         return None, None, None, None
-    operation = opcode_to_op[opcode].name.lower()
+    operation = opcode_to_op[opcode]
     displacement = None
     if (mod == 0b00 and rm == 0b110) or mod == 0b01 or mod == 0b10:
         disp_width = 1 if mod == 0b01 else 2
@@ -77,19 +77,18 @@ def mod_opcode_rm_to_dest_width_value(b1, bytes:bytearray, s_for_width = False):
     data_width = 2 if (s_for_width and not s and w) or (not s_for_width and w) else 1
     value = int.from_bytes(bytes[:data_width], "little")
     del bytes[:data_width]
-    rm_name = None
     instant_width = None
     if mod == 0b11:
-        rm_name = Register((w,rm)).name.lower()
-        return rm_name, instant_width, value, operation
+        return Register((w,rm)), instant_width, value, operation
     else:
+        rm_name = None
         instant_width = "word " if w else "byte "
         if mod == 0b00 and rm == 0b110:
             rm_name = f"[{displacement}]"
         else:
             rm_name = rm_to_effective_address[rm]
             rm_name = format_register_displacement(rm_name, displacement)
-    return rm_name, instant_width, value, operation
+        return rm_name, instant_width, value, operation
 
 def mem_to_accumulator(b1, bytes: bytearray):
     d = b1 >> 1 & 1
@@ -152,9 +151,10 @@ def parse(bytes: bytearray):
             output.append(f"add {dest}, {source}")
         
         elif b1 >> 2 == 0b100000: # ADD/SUB/CMP immediate to register/memory
-            dest, width, value, opcode = mod_opcode_rm_to_dest_width_value(b1, bytes, True)
+            dest, width, value, operation = mod_opcode_rm_to_dest_width_value(b1, bytes, True)
             if dest:
-                output.append(f"{opcode} {width if width else ""}{dest}, {value}")
+                cpu.execute(operation, dest, value) # TODO: deal with width
+                output.append(f"{operation.name.lower()} {width if width else ""}{dest}, {value}")
             else:
                 print(f"Unknown instruction {b1:08b}")
                 output.append(f"UNK {b1:08b}")
@@ -165,6 +165,7 @@ def parse(bytes: bytearray):
         
         elif b1 >> 2 == 0b001010: # SUB reg/memory and register to either
             dest, source = mod_reg_rm_to_dest_source(b1, bytes)
+            cpu.execute(Operation.SUB, dest, source)
             output.append(f"sub {dest}, {source}")
             
         elif b1 >> 1 == 0b0010110: # SUB immediate from accumulator
@@ -173,6 +174,7 @@ def parse(bytes: bytearray):
         
         elif b1 >> 2 == 0b001110: # CMP reg/memory and register
             dest, source = mod_reg_rm_to_dest_source(b1, bytes)
+            cpu.execute(Operation.CMP, dest, source)
             output.append(f"cmp {dest}, {source}")
             
         elif b1 >> 1 == 0b0011110: # CMP immediate with accumulator

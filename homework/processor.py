@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from ctypes import c_uint8
+from ctypes import c_uint16
 
 
 class Register(Enum):
@@ -35,6 +35,7 @@ class Register(Enum):
 class Flags(Enum):
     ZF = 0  # Zero flag
     SF = 1  # Sign flag
+    PF = 2  # Parity flag
     # We don't simulate other flags for now
 
 
@@ -54,37 +55,55 @@ class FlagWord:
         return self.word >> bit & 1
 
     def __setitem__(self, bit: Flags, value: int):
-        self.word = (self.word & ~(1 << bit.value)) | ((value & 1) << bit.value)
+        if self[bit.value] == value:
+            return
+        print(f"Flag {bit.name}: {self[bit.value]} -> {int(value)}")
+        self.word = (self.word & ~(1 << bit.value)) | (
+            (value & 1) << bit.value)
 
 
 class Registers:
     def __init__(self):
         # AX, CX, DX, BX, SP, BP, SI, DI
-        self.words = [0] * 8
+        self.words = [c_uint16(0) for _ in range(8)]
 
-    def __getitem__(self, register):
+    def __getitem__(self, register) -> int:
         w, code = register.value
+
         if w:
-            return self.words[code]
+            return self.words[code].value
 
         index = code & 0b11
         shift = 8 if code & 0b100 else 0
-        return (self.words[index] >> shift) & 0xFF
+        return (self.words[index].value >> shift) & 0xFF
 
-    def __setitem__(self, register, value):
+    def __setitem__(self, register, value: int | c_uint16) -> None:
+        if isinstance(value, c_uint16):
+            value = value.value
+
         w, code = register.value
         if w:
-            print(f"Set {register.name} {self.words[code]:#04x} -> {value:#04x}")
-            self.words[code] = value & 0xFFFF
+            word = self.words[code]
+            new_value = value & 0xFFFF
+            print(
+                f"{register.name} "
+                f"{word.value:#06x} -> {new_value:#06x}"
+            )
+            word.value = new_value
             return
 
         index = code & 0b11
         shift = 8 if code & 0b100 else 0
         mask = 0xFF << shift
-        self.words[index] = (
-            (self.words[index] & ~mask) | ((value & 0xFF) << shift)
-        )
+        word = self.words[index]
+        word.value = (word.value & ~mask) | ((value & 0xFF) << shift)
 
+
+def parity(result: c_uint16):
+    count = 0
+    for shift in range(8):
+        count += result >> shift & 0b1
+    return count % 2 == 0
 
 class CPU:
     registers: Register
@@ -94,19 +113,36 @@ class CPU:
         self.registers = Registers()
         self.flags = FlagWord()
         return
-    
-    def _printInstruction(self, op: Operation, dest: str, source: str):
-        print(f"{op.name:<4} {dest}, {source:<4}", end="; ")
-        
-    def execute(self, op: Operation, dest: Register, source: int):
+
+    def _printInstruction(self, op: Operation, dest: Register, source: Register | int):
+        src = None
+        if type(source) == Register:
+            src = source.name
+        else:
+            src = source
+        print(f"{op.name:<4} {dest.name}, {src:<6}", end="; ")
+
+    def __upateFlags(self, result: c_uint16):
+        self.flags[Flags.ZF] = result == 0
+        self.flags[Flags.SF] = result >> 15 & 1
+        self.flags[Flags.PF] = parity(result)
+
+    def execute(self, op: Operation, dest: Register, source: Register | int):
+        self._printInstruction(op, dest, source)
+        src = self.registers[source] if type(source) == Register else source
         match op:
             case Operation.MOV:
-                if type(source) == Register:
-                    self._printInstruction(op, dest.name, source.name)
-                    self.registers[dest] = self.registers[source]
-                    return
-                self._printInstruction(op, dest.name, source)
-                self.registers[dest] = source
+                self.registers[dest] = src
+                return
+            case Operation.ADD:
+                self.registers[dest] += src
+                self.__upateFlags(self.registers[dest])
+            case Operation.SUB:
+                self.registers[dest] -= src
+                self.__upateFlags(self.registers[dest])
+            case Operation.CMP:
+                res = self.registers[dest] - src
+                self.__upateFlags(res)
             case _:
                 print(f"Can't simulate unsupported operation {op.name}")
 
@@ -114,7 +150,11 @@ class CPU:
         print(f"CPU registers state:")
         for reg in range(8):
             register = Register((1, reg))
+            if self.registers[register] == 0:
+                continue
             print(
-                f"{register.name}: {self.registers[register]:016b} - {self.registers[register]:#04x}")
+                f"\t{register.name}: {self.registers[register]:#04x} ({self.registers[register]})")
+
+        print()
         for flag in range(len(Flags)):
-            print(f"{Flags(flag).name}: {self.flags[flag]}", end=";\t")
+            print(f"\t{Flags(flag).name}: {self.flags[flag]}", end=";\t")
