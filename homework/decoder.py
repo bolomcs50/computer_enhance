@@ -119,7 +119,6 @@ def ip_inc8(bytes: bytearray):
 def parse(bytes: bytearray):
     output = ["bits 16"]
     cpu = CPU()
-    cpu.printState()
     while len(bytes):
         b1 = bytes.pop(0)
         

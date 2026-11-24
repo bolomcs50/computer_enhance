@@ -1,4 +1,6 @@
 from enum import Enum, auto
+from ctypes import c_uint8
+
 
 class Register(Enum):
     # 8-bit registers: w = 0
@@ -29,13 +31,33 @@ class Register(Enum):
     # BP = 0b110
     # BX = 0b111
 
+
+class Flags(Enum):
+    ZF = 0  # Zero flag
+    SF = 1  # Sign flag
+    # We don't simulate other flags for now
+
+
 class Operation(Enum):
     MOV = auto()
     ADD = auto()
     SUB = auto()
     CMP = auto()
-    
-class CPU:
+
+
+class FlagWord:
+    def __init__(self):
+        # SF, ZF
+        self.word = 0
+
+    def __getitem__(self, bit):
+        return self.word >> bit & 1
+
+    def __setitem__(self, bit: Flags, value: int):
+        self.word = (self.word & ~(1 << bit.value)) | ((value & 1) << bit.value)
+
+
+class Registers:
     def __init__(self):
         # AX, CX, DX, BX, SP, BP, SI, DI
         self.words = [0] * 8
@@ -52,7 +74,7 @@ class CPU:
     def __setitem__(self, register, value):
         w, code = register.value
         if w:
-            print(f"Set {register.name} {self.words[code]:08b} -> {value:08b}")
+            print(f"Set {register.name} {self.words[code]:#04x} -> {value:#04x}")
             self.words[code] = value & 0xFFFF
             return
 
@@ -63,20 +85,36 @@ class CPU:
             (self.words[index] & ~mask) | ((value & 0xFF) << shift)
         )
 
-    def execute(self, op: Operation, dest : Register, source: int):
+
+class CPU:
+    registers: Register
+    flags: FlagWord
+
+    def __init__(self):
+        self.registers = Registers()
+        self.flags = FlagWord()
+        return
+    
+    def _printInstruction(self, op: Operation, dest: str, source: str):
+        print(f"{op.name:<4} {dest}, {source:<4}", end="; ")
+        
+    def execute(self, op: Operation, dest: Register, source: int):
         match op:
             case Operation.MOV:
                 if type(source) == Register:
-                    print(f"{op.name} {dest.name}, {source.name}")
-                    self[dest] = self[source]
+                    self._printInstruction(op, dest.name, source.name)
+                    self.registers[dest] = self.registers[source]
                     return
-                print(f"{op.name} {dest.name}, {source}")
-                self[dest] = source
+                self._printInstruction(op, dest.name, source)
+                self.registers[dest] = source
             case _:
                 print(f"Can't simulate unsupported operation {op.name}")
-    
+
     def printState(self):
         print(f"CPU registers state:")
-        for code in range(8):
-            register = Register((1, code))
-            print(f"{register.name}: {self[register]:08b}")
+        for reg in range(8):
+            register = Register((1, reg))
+            print(
+                f"{register.name}: {self.registers[register]:016b} - {self.registers[register]:#04x}")
+        for flag in range(len(Flags)):
+            print(f"{Flags(flag).name}: {self.flags[flag]}", end=";\t")
