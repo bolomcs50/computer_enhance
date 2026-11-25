@@ -123,7 +123,7 @@ def parse(bytes: bytearray):
         
         if b1 >> 2 == 0b100010: # MOV register/memory to/from register
             dest, source = mod_reg_rm_to_dest_source(b1, cpu)
-            # cpu.execute(Operation.MOV, dest, source)
+            cpu.execute(Operation.MOV, dest, source)
             output.append(f"mov {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
 
         elif b1 >> 4 == 0b1011: # MOV immediate to register
@@ -135,7 +135,7 @@ def parse(bytes: bytearray):
             data_bytes = 2 if w else 1
             value = int.from_bytes([cpu.getNextByte() for _ in range(data_bytes)], "little")
             arguments += str(value)
-            # cpu.execute(Operation.MOV, register, value)
+            cpu.execute(Operation.MOV, register, value)
             output.append(f"mov {arguments}")
             
         elif b1 >> 1 == 0b1100011: # MOV immediate to register/memory
@@ -153,7 +153,7 @@ def parse(bytes: bytearray):
         elif b1 >> 2 == 0b100000: # ADD/SUB/CMP immediate to register/memory
             dest, width, value, operation = mod_opcode_rm_to_dest_width_value(b1, cpu, True)
             if dest:
-                # cpu.execute(operation, dest, value) # TODO: deal with width
+                cpu.execute(operation, dest, value) # TODO: deal with width
                 output.append(f"{operation.name.lower()} {width if width else ""}{regOrStringToLow(dest)}, {value}")
             else:
                 print(f"Unknown instruction {b1:08b}")
@@ -165,7 +165,7 @@ def parse(bytes: bytearray):
         
         elif b1 >> 2 == 0b001010: # SUB reg/memory and register to either
             dest, source = mod_reg_rm_to_dest_source(b1, cpu)
-            # cpu.execute(Operation.SUB, dest, source)
+            cpu.execute(Operation.SUB, dest, source)
             output.append(f"sub {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
             
         elif b1 >> 1 == 0b0010110: # SUB immediate from accumulator
@@ -174,7 +174,7 @@ def parse(bytes: bytearray):
         
         elif b1 >> 2 == 0b001110: # CMP reg/memory and register
             dest, source = mod_reg_rm_to_dest_source(b1, cpu)
-            # cpu.execute(Operation.CMP, dest, source)
+            cpu.execute(Operation.CMP, dest, source)
             output.append(f"cmp {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
             
         elif b1 >> 1 == 0b0011110: # CMP immediate with accumulator
@@ -182,83 +182,84 @@ def parse(bytes: bytearray):
             output.append(f"cmp {acc}, {value}")
             
         elif b1 == 0b01110101: # JNZ: Jump if not equal/zero
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jnz {inc8}")
+            cpu.execute(Operation.JNZ, inc8)
         
         elif b1 == 0b01110100: # JE: Jump if equal/zero
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"je {inc8}")
 
         elif b1 == 0b01111100: # JL: Jump on less
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jl {inc8}")
         
         elif b1 == 0b01111110: # JLE: Jump on less or equal
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jle {inc8}")
         
         elif b1 == 0b01110010: # JB: Jump on below
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jb {inc8}")
         
         elif b1 == 0b01110110: # JBE: Jump on below or equal
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jbe {inc8}")
                                 
         elif b1 == 0b01111010: # JP: Jump on parity
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jp {inc8}")
         
         elif b1 == 0b01110000: # JO: Jump on overflow
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jo {inc8}")
         
         elif b1 == 0b01111000: # JS: Jump on sign
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"js {inc8}")
                     
         elif b1 == 0b01111101: # JNL: Jump on not less
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jnl {inc8}")
                     
         elif b1 == 0b01111111: # JG: Jump on greater
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jg {inc8}")
                     
         elif b1 == 0b01110011: # JNB: Jump on not below
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jnb {inc8}")
                     
         elif b1 == 0b01110111: # JA: Jump if above
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"ja {inc8}")
                     
         elif b1 == 0b01111011: # JNP: Jump on not par
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jnp {inc8}")
             
         elif b1 == 0b01110001: # JNO: Jump on not overflow
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jno {inc8}")
 
         elif b1 == 0b01111001: # JNS: Jump on not sign
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jns {inc8}")
 
         elif b1 == 0b11100010: # Loop CX times
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"loop {inc8}")
 
         elif b1 == 0b11100001: # Loop while zero
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"loopz {inc8}")
 
         elif b1 == 0b11100000: # Loop while nonzero
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"loopnz {inc8}")
 
         elif b1 == 0b11100011: # Jump on CX zero
-            inc8 = int(cpu.getNextByte())
+            inc8 = int.from_bytes([cpu.getNextByte()], "little", signed=True)
             output.append(f"jcxz {inc8}")
  
         else:

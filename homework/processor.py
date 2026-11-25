@@ -22,14 +22,6 @@ class Register(Enum):
     BP = (1, 0b101)
     SI = (1, 0b110)
     DI = (1, 0b111)
-    # BX_SI = 0b000
-    # BX_DI = 0b001
-    # BP_SI = 0b010
-    # BP_DI = 0b011
-    # SI = 0b100
-    # DI = 0b101
-    # BP = 0b110
-    # BX = 0b111
 
 
 class Flags(Enum):
@@ -44,20 +36,21 @@ class Operation(Enum):
     ADD = auto()
     SUB = auto()
     CMP = auto()
+    JNZ = auto()
 
 
 class FlagWord:
     def __init__(self):
-        # SF, ZF
+        # SF, ZF, PF, ...
         self.word = 0
 
-    def __getitem__(self, bit):
-        return self.word >> bit & 1
+    def __getitem__(self, bit: Flags):
+        return self.word >> bit.value & 1
 
     def __setitem__(self, bit: Flags, value: int):
-        if self[bit.value] == value:
+        if self[bit] == value:
             return
-        print(f"Flag {bit.name}: {self[bit.value]} -> {int(value)}")
+        print(f"Flag {bit.name}: {self[bit]} -> {int(value)}")
         self.word = (self.word & ~(1 << bit.value)) | (
             (value & 1) << bit.value)
 
@@ -118,13 +111,19 @@ class CPU:
         self.ip = 0
         return
 
-    def __printInstruction(self, op: Operation, dest: Register, source: Register | int):
-        src = None
+    def __printInstruction(self, op: Operation, dest: Register | int, source: Register | int):
+        src = source
         if type(source) == Register:
             src = source.name
+        dst = dest
+        if type(dest) == Register:
+            dst = dest.name
+        
+        print(f"{op.name:<4} {dst}", end="")
+        if src:
+            print(f", {src:<6}", end = "; ")
         else:
-            src = source
-        print(f"{op.name:<4} {dest.name}, {src:<6}", end="; ")
+            print("", end="; ")
 
     def __upateFlags(self, result: c_uint16):
         self.flags[Flags.ZF] = result == 0
@@ -141,7 +140,7 @@ class CPU:
         self.ip += 1
         return byte
 
-    def execute(self, op: Operation, dest: Register, source: Register | int):
+    def execute(self, op: Operation, dest: Register | int, source: Register | int = None):
         self.__printInstruction(op, dest, source)
         src = self.registers[source] if type(source) == Register else source
         match op:
@@ -157,6 +156,9 @@ class CPU:
             case Operation.CMP:
                 res = self.registers[dest] - src
                 self.__upateFlags(res)
+            case Operation.JNZ:
+                if not self.flags[Flags.ZF]:
+                    self.ip += dest
             case _:
                 print(f"Can't simulate unsupported operation {op.name}")
 
@@ -170,8 +172,8 @@ class CPU:
                 f"\t{register.name}: {self.registers[register]:#04x} ({self.registers[register]})")
 
         print()
-        for flag in range(len(Flags)):
-            print(f"\t{Flags(flag).name}: {self.flags[flag]}", end=";\t")
+        for flag in Flags:
+            print(f"\t{flag.name}: {self.flags[flag]}", end="")
             
         print()
-        print(f"IP: {self.ip}")
+        print(f"\tIP: {self.ip}")
