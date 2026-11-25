@@ -108,13 +108,17 @@ def parity(result: c_uint16):
 class CPU:
     registers: Register
     flags: FlagWord
+    instructions: bytearray
+    ip: int # Instruction Pointer
 
-    def __init__(self):
+    def __init__(self, instructions: bytearray):
         self.registers = Registers()
         self.flags = FlagWord()
+        self.instructions = instructions
+        self.ip = 0
         return
 
-    def _printInstruction(self, op: Operation, dest: Register, source: Register | int):
+    def __printInstruction(self, op: Operation, dest: Register, source: Register | int):
         src = None
         if type(source) == Register:
             src = source.name
@@ -127,8 +131,18 @@ class CPU:
         self.flags[Flags.SF] = result >> 15 & 1
         self.flags[Flags.PF] = parity(result)
 
+    def hasNextByte(self):
+        return self.ip < len(self.instructions)
+
+    def getNextByte(self):
+        if self.ip >= len(self.instructions):
+            return None
+        byte = self.instructions[self.ip]
+        self.ip += 1
+        return byte
+
     def execute(self, op: Operation, dest: Register, source: Register | int):
-        self._printInstruction(op, dest, source)
+        self.__printInstruction(op, dest, source)
         src = self.registers[source] if type(source) == Register else source
         match op:
             case Operation.MOV:
@@ -158,3 +172,6 @@ class CPU:
         print()
         for flag in range(len(Flags)):
             print(f"\t{Flags(flag).name}: {self.flags[flag]}", end=";\t")
+            
+        print()
+        print(f"IP: {self.ip}")
