@@ -1,18 +1,7 @@
 # Read assembled Intel 8086 binaries and decode them to instructions
 # https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 
-from processor import CPU, Operation, Register
-
-rm_to_effective_address = {
-    0b000 : "bx + si",
-    0b001 : "bx + di",
-    0b010 : "bp + si",
-    0b011 : "bp + di",
-    0b100 : "si",
-    0b101 : "di",
-    0b110 : "bp",
-    0b111 : "bx",
-}
+from processor import CPU, Operation, Register, Address, PointerRegister
 
 opcode_to_op = {
     0b000 : Operation.ADD,
@@ -37,9 +26,9 @@ def mod_reg_rm_to_dest_source(b1, cpu: CPU):
     
     if mod == 0b00 and rm == 0b110:
         data = [cpu.getNextByte(), cpu.getNextByte()]
-        value = f"[{int.from_bytes(data, "little")}]"
-        dest = register if d else value
-        source = value if d else register
+        address = Address(PointerRegister.NONE, int.from_bytes(data, "little"))
+        dest = register if d else address
+        source = address if d else register
         return dest, source
     
     displacement = None
@@ -47,14 +36,16 @@ def mod_reg_rm_to_dest_source(b1, cpu: CPU):
         disp_length = 1 if mod == 0b01 else 2
         displacement = int.from_bytes([cpu.getNextByte() for _ in range(disp_length)], "little", signed=True)
 
-    rm_name = format_register_displacement(rm_to_effective_address[rm], displacement)
-    dest = register if d else rm_name
-    source = rm_name if d else register
+    rm_addr = Address(rm, displacement)
+    dest = register if d else rm_addr
+    source = rm_addr if d else register
     return dest, source
 
 def format_register_displacement(r_name, displacement):
     if not displacement:
         return f"[{r_name}]"
+    elif r_name == "":
+        return f"[{displacement}]"
     elif displacement > 0:
         return f"[{r_name} + {displacement}]"
     return f"[{r_name} - {abs(displacement)}]"
@@ -68,7 +59,7 @@ def mod_opcode_rm_to_dest_width_value(b1, cpu: CPU, s_for_width = False):
     rm = b2 & 0b111
     
     if opcode not in opcode_to_op.keys():
-        return None, None, None, None
+        return None, None, None, None, None
     operation = opcode_to_op[opcode]
     
     displacement = None
@@ -80,16 +71,15 @@ def mod_opcode_rm_to_dest_width_value(b1, cpu: CPU, s_for_width = False):
 
     instant_width = None
     if mod == 0b11:
-        return Register((w,rm)), instant_width, value, operation
+        return Register((w,rm)), 0, instant_width, value, operation
     else:
         rm_name = None
-        instant_width = "word " if w else "byte "
+        instant_width = 2 if w else 1
         if mod == 0b00 and rm == 0b110:
-            rm_name = f"[{displacement}]"
+            rm_name = Address(PointerRegister.NONE, displacement)
         else:
-            rm_name = rm_to_effective_address[rm]
-            rm_name = format_register_displacement(rm_name, displacement)
-        return rm_name, instant_width, value, operation
+            rm_name = Address(PointerRegister(rm), displacement)
+        return rm_name, displacement, instant_width, value, operation
 
 def mem_to_accumulator(b1, cpu: CPU):
     d = b1 >> 1 & 1
@@ -139,8 +129,11 @@ def parse(bytes: bytearray):
             output.append(f"mov {arguments}")
             
         elif b1 >> 1 == 0b1100011: # MOV immediate to register/memory
-            dest, width, value, _ = mod_opcode_rm_to_dest_width_value(b1, cpu)
-            output.append(f"mov {dest}, {width if width else ""}{value}")
+            dest, displacement, width, value, _ = mod_opcode_rm_to_dest_width_value(b1, cpu)
+            dst = format_register_displacement(dest, displacement) if type(dest) != Register else dest
+            w = "word " if width == 2 else "byte " if width == 1 else ""
+            cpu.execute(Operation.MOV, dest, value)
+            output.append(f"mov {dst}, {w}{value}")
 
         elif b1 >> 2 == 0b101000: # MOV memory to accumulator and MOV accumulator to memory
             dest, src = mem_to_accumulator(b1, cpu)
@@ -151,10 +144,12 @@ def parse(bytes: bytearray):
             output.append(f"add {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
         
         elif b1 >> 2 == 0b100000: # ADD/SUB/CMP immediate to register/memory
-            dest, width, value, operation = mod_opcode_rm_to_dest_width_value(b1, cpu, True)
-            if dest:
+            dest, displacement, width, value, operation = mod_opcode_rm_to_dest_width_value(b1, cpu, True)
+            if dest != None:
+                w = "word " if width == 2 else "byte " if width == 1 else ""
+                dst = format_register_displacement(dest, displacement) if type(dest) != Register else dest
                 cpu.execute(operation, dest, value) # TODO: deal with width
-                output.append(f"{operation.name.lower()} {width if width else ""}{regOrStringToLow(dest)}, {value}")
+                output.append(f"{operation.name.lower()} {w}{regOrStringToLow(dst)}, {value}")
             else:
                 print(f"Unknown instruction {b1:08b}")
                 output.append(f"UNK {b1:08b}")

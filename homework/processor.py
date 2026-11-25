@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from ctypes import c_uint16
+from ctypes import c_uint16, c_uint8
 
 
 class Register(Enum):
@@ -22,6 +22,17 @@ class Register(Enum):
     BP = (1, 0b101)
     SI = (1, 0b110)
     DI = (1, 0b111)
+    
+class PointerRegister(Enum):
+    BX_SI = 0b000
+    BX_DI = 0b001
+    BP_SI = 0b010
+    BP_DI = 0b011
+    SI = 0b100
+    DI = 0b101
+    BP = 0b110
+    BX = 0b111
+    NONE = auto()
 
 
 class Flags(Enum):
@@ -71,7 +82,7 @@ class Registers:
         return (self.words[index].value >> shift) & 0xFF
 
     def __setitem__(self, register, value: int | c_uint16) -> None:
-        if isinstance(value, c_uint16):
+        if isinstance(value, c_uint16) or isinstance(value, c_uint8):
             value = value.value
 
         w, code = register.value
@@ -91,6 +102,13 @@ class Registers:
         word = self.words[index]
         word.value = (word.value & ~mask) | ((value & 0xFF) << shift)
 
+class Address:
+    fromRegister: PointerRegister
+    value: int
+    
+    def __init__(self, fromRegister: PointerRegister, value: int):
+        self.fromRegister = fromRegister
+        self.value = value
 
 def parity(result: c_uint16):
     count = 0
@@ -103,21 +121,32 @@ class CPU:
     flags: FlagWord
     instructions: bytearray
     ip: int # Instruction Pointer
+    memory: list[c_uint8]
 
     def __init__(self, instructions: bytearray):
         self.registers = Registers()
         self.flags = FlagWord()
         self.instructions = instructions
         self.ip = 0
+        self.memory = [c_uint8(0)] * 1024 * 1024 # 1 MB of memory on a 8086 
         return
 
-    def __printInstruction(self, op: Operation, dest: Register | int, source: Register | int):
-        src = source
-        if type(source) == Register:
-            src = source.name
-        dst = dest
-        if type(dest) == Register:
-            dst = dest.name
+    def __formatRegAddrInt(self, x: Register | Address | int):
+        src = x
+        if type(x) == Register:
+            src = x.name
+        elif type(x) == Address:
+            if x.fromRegister == PointerRegister.NONE:
+                src = f"[{x.value}]"
+            elif x.value == 0:
+                src = f"[{x.fromRegister.name}]"
+            else:
+                src = f"[{x.fromRegister.name} + {x.value}]"
+        return src
+
+    def __printInstruction(self, op: Operation, dest: Register | Address | int, source: Register | Address | int):
+        dst = self.__formatRegAddrInt(dest)
+        src = self.__formatRegAddrInt(source)
         
         print(f"{op.name:<4} {dst}", end="")
         if src:
@@ -129,6 +158,27 @@ class CPU:
         self.flags[Flags.ZF] = result == 0
         self.flags[Flags.SF] = result >> 15 & 1
         self.flags[Flags.PF] = parity(result)
+    
+    def __calcAddr(self, addr: Address):
+        start: int = 0
+        match addr.fromRegister:
+            case PointerRegister.BX_SI:
+                start = self.registers[Register.BX] + self.registers[Register.SI]
+            case PointerRegister.BX_DI:
+                start = self.registers[Register.BX] + self.registers[Register.DI]
+            case PointerRegister.BP_SI:
+                start = self.registers[Register.BP] + self.registers[Register.SI]
+            case PointerRegister.BP_DI:
+                start = self.registers[Register.BP] + self.registers[Register.DI]
+            case PointerRegister.SI:
+                start = self.registers[Register.SI]
+            case PointerRegister.DI:
+                start = self.registers[Register.DI]
+            case PointerRegister.BP:
+                start = self.registers[Register.BP]
+            case PointerRegister.BX:
+                start = self.registers[Register.BX]
+        return start + addr.value
 
     def hasNextByte(self):
         return self.ip < len(self.instructions)
@@ -140,13 +190,25 @@ class CPU:
         self.ip += 1
         return byte
 
-    def execute(self, op: Operation, dest: Register | int, source: Register | int = None):
+    def extractValue(self, x: Register | Address | int):
+        if type(x) == int or x == None:
+            return x
+        if type(x) == Register:
+            return self.registers[x]
+        addr = self.__calcAddr(x)
+        return self.memory[addr]
+    
+    def execute(self, op: Operation, dest: Register | Address | int, source: Register | Address | int = None):
         self.__printInstruction(op, dest, source)
-        src = self.registers[source] if type(source) == Register else source
+        src = self.extractValue(source)
         match op:
             case Operation.MOV:
-                self.registers[dest] = src
-                return
+                if type(dest) == Address:
+                    addr = self.__calcAddr(dest)
+                    self.memory[addr] = source
+                    print()
+                else:
+                    self.registers[dest] = src
             case Operation.ADD:
                 self.registers[dest] += src
                 self.__upateFlags(self.registers[dest])
@@ -171,9 +233,14 @@ class CPU:
             print(
                 f"\t{register.name}: {self.registers[register]:#04x} ({self.registers[register]})")
 
-        print()
+        print("Flags and Instruction Pointer")
         for flag in Flags:
             print(f"\t{flag.name}: {self.flags[flag]}", end="")
             
         print()
         print(f"\tIP: {self.ip}")
+        
+        print("Nonzero Memory")
+        for i in range(len(self.memory)):
+            if self.memory[i]:
+                print(f"\t{i:<4}: {self.memory[i]:#04x}")
