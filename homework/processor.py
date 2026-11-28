@@ -104,11 +104,11 @@ class Registers:
 
 class Address:
     fromRegister: PointerRegister
-    value: int
+    displacement: int
     
-    def __init__(self, fromRegister: PointerRegister, value: int):
+    def __init__(self, fromRegister: PointerRegister, displacement: int = 0):
         self.fromRegister = fromRegister
-        self.value = value
+        self.displacement = displacement
 
 def parity(result: c_uint16):
     count = 0
@@ -116,39 +116,42 @@ def parity(result: c_uint16):
         count += result >> shift & 0b1
     return count % 2 == 0
 
+def formatRegAddrInt(x: Register | Address | int):
+    src = x
+    if type(x) == Register:
+        src = x.name.lower()
+    elif type(x) == Address:
+        if x.fromRegister == PointerRegister.NONE:
+            src = f"[{x.displacement}]"
+        elif not x.displacement:
+            src = f"[{x.fromRegister.name.lower()}]"
+        else:
+            src = f"[{x.fromRegister.name.lower()} + {x.displacement}]"
+    return src
+
 class CPU:
     registers: Register
     flags: FlagWord
     instructions: bytearray
     ip: int # Instruction Pointer
     memory: list[c_uint8]
+    cycles: int
 
     def __init__(self, instructions: bytearray):
         self.registers = Registers()
         self.flags = FlagWord()
         self.instructions = instructions
         self.ip = 0
-        self.memory = [c_uint8(0)] * 1024 * 1024 # 1 MB of memory on a 8086 
+        self.memory = [c_uint8(0)] * 1024 * 1024 # 1 MB of memory on a 8086
+        self.cycles = 0
         return
 
-    def __formatRegAddrInt(self, x: Register | Address | int):
-        src = x
-        if type(x) == Register:
-            src = x.name
-        elif type(x) == Address:
-            if x.fromRegister == PointerRegister.NONE:
-                src = f"[{x.value}]"
-            elif x.value == 0:
-                src = f"[{x.fromRegister.name}]"
-            else:
-                src = f"[{x.fromRegister.name} + {x.value}]"
-        return src
 
     def __printInstruction(self, op: Operation, dest: Register | Address | int, source: Register | Address | int):
-        dst = self.__formatRegAddrInt(dest)
-        src = self.__formatRegAddrInt(source)
+        dst = formatRegAddrInt(dest)
+        src = formatRegAddrInt(source)
         
-        print(f"{op.name:<4} {dst}", end="")
+        print(f"{op.name.lower():<4} {dst}", end="")
         if src:
             print(f", {src:<6}", end = "; ")
         else:
@@ -161,6 +164,7 @@ class CPU:
     
     def __calcAddr(self, addr: Address):
         start: int = 0
+        cycles: int = 0
         match addr.fromRegister:
             case PointerRegister.BX_SI:
                 start = self.registers[Register.BX] + self.registers[Register.SI]
@@ -178,7 +182,19 @@ class CPU:
                 start = self.registers[Register.BP]
             case PointerRegister.BX:
                 start = self.registers[Register.BX]
-        return start + addr.value
+
+        match addr.fromRegister:
+            case PointerRegister.NONE:
+                cycles += 6
+            case PointerRegister.SI | PointerRegister.DI | PointerRegister.BP | PointerRegister.BX:
+                cycles += 9 if addr.displacement else 5
+            case PointerRegister.BP_DI | PointerRegister.BX_SI:
+                cycles += 11 if addr.displacement else 7
+            case PointerRegister.BP_SI | PointerRegister.BX_DI:
+                cycles += 12 if addr.displacement else 8
+        
+        self.cycles += cycles
+        return start + addr.displacement
 
     def hasNextByte(self):
         return self.ip < len(self.instructions)
@@ -203,15 +219,48 @@ class CPU:
         src = self.extractValue(source)
         match op:
             case Operation.MOV:
+                # Cycle estimation
+                if type (dest) == Register:
+                    if type(source) == Register:
+                        self.cycles += 2
+                    elif type(source) == int:
+                        self.cycles += 4
+                    elif type(source) == Address:
+                        self.cycles += 8
+                        self.cycles += 4 # Memory fetch penalty
+                if type(dest) == Address:
+                    self.cycles += 4 # Memory write penalty
+                    if type(source) == Register:
+                        self.cycles += 9
+                        
                 if type(dest) == Address:
                     addr = self.__calcAddr(dest)
-                    self.memory[addr] = source
+                    self.memory[addr] = src
                     print()
                 else:
                     self.registers[dest] = src
             case Operation.ADD:
-                self.registers[dest] += src
-                self.__upateFlags(self.registers[dest])
+                if type(dest) == Register:
+                    if type(source) == Register:
+                        self.cycles += 3
+                    elif type(source) == Address:
+                        self.cycles += 9
+                        self.cycles += 4 # Memory transfer penalty
+                    elif type(source) == int:
+                        self.cycles += 4
+                if type(dest) == Address:
+                    self.cycles += 8 # Double memory transfer penalty
+                    if type(source) == Register:
+                        self.cycles += 16
+                
+                if type(dest) == Address:
+                    addr = self.__calcAddr(dest)
+                    self.memory[addr] += src
+                    self.__upateFlags(self.memory[addr])
+                    print()
+                else:
+                    self.registers[dest] += src
+                    self.__upateFlags(self.registers[dest])
             case Operation.SUB:
                 self.registers[dest] -= src
                 self.__upateFlags(self.registers[dest])
@@ -223,6 +272,7 @@ class CPU:
                     self.ip += dest
             case _:
                 print(f"Can't simulate unsupported operation {op.name}")
+        print(f"Now cycles {self.cycles}")
 
     def printState(self):
         print(f"CPU registers state:")
@@ -239,6 +289,7 @@ class CPU:
             
         print()
         print(f"\tIP: {self.ip}")
+        print(f"Estimated cylces: {self.cycles}")
         
         print("Nonzero Memory")
         for i in range(len(self.memory)):

@@ -1,7 +1,7 @@
 # Read assembled Intel 8086 binaries and decode them to instructions
 # https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 
-from processor import CPU, Operation, Register, Address, PointerRegister
+from processor import CPU, Operation, Register, Address, PointerRegister, formatRegAddrInt
 
 opcode_to_op = {
     0b000 : Operation.ADD,
@@ -31,12 +31,12 @@ def mod_reg_rm_to_dest_source(b1, cpu: CPU):
         source = address if d else register
         return dest, source
     
-    displacement = None
+    displacement = 0
     if mod == 0b01 or mod == 0b10:
         disp_length = 1 if mod == 0b01 else 2
         displacement = int.from_bytes([cpu.getNextByte() for _ in range(disp_length)], "little", signed=True)
 
-    rm_addr = Address(rm, displacement)
+    rm_addr = Address(PointerRegister(rm), displacement)
     dest = register if d else rm_addr
     source = rm_addr if d else register
     return dest, source
@@ -99,11 +99,6 @@ def data_to_accumulator(b1, cpu: CPU):
     accumulator = "ax" if w else "al"
     return accumulator, value
 
-def regOrStringToLow(reg: Register | str):
-    if type(reg) == Register:
-        return reg.name.lower()
-    return reg
-
 def parse(bytes: bytearray):
     output = ["bits 16"]
     cpu = CPU(bytes)
@@ -114,7 +109,7 @@ def parse(bytes: bytearray):
         if b1 >> 2 == 0b100010: # MOV register/memory to/from register
             dest, source = mod_reg_rm_to_dest_source(b1, cpu)
             cpu.execute(Operation.MOV, dest, source)
-            output.append(f"mov {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
+            output.append(f"mov {formatRegAddrInt(dest)}, {formatRegAddrInt(source)}")
 
         elif b1 >> 4 == 0b1011: # MOV immediate to register
             w = b1 >> 3 & 1
@@ -141,7 +136,8 @@ def parse(bytes: bytearray):
 
         elif b1 >> 2 == 0b000000: # ADD reg/memory with register to either
             dest, source = mod_reg_rm_to_dest_source(b1, cpu)
-            output.append(f"add {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
+            cpu.execute(Operation.ADD, dest, source)
+            output.append(f"add {formatRegAddrInt(dest)}, {formatRegAddrInt(source)}")
         
         elif b1 >> 2 == 0b100000: # ADD/SUB/CMP immediate to register/memory
             dest, displacement, width, value, operation = mod_opcode_rm_to_dest_width_value(b1, cpu, True)
@@ -149,7 +145,7 @@ def parse(bytes: bytearray):
                 w = "word " if width == 2 else "byte " if width == 1 else ""
                 dst = format_register_displacement(dest, displacement) if type(dest) != Register else dest
                 cpu.execute(operation, dest, value) # TODO: deal with width
-                output.append(f"{operation.name.lower()} {w}{regOrStringToLow(dst)}, {value}")
+                output.append(f"{operation.name.lower()} {w}{formatRegAddrInt(dst)}, {value}")
             else:
                 print(f"Unknown instruction {b1:08b}")
                 output.append(f"UNK {b1:08b}")
@@ -161,7 +157,7 @@ def parse(bytes: bytearray):
         elif b1 >> 2 == 0b001010: # SUB reg/memory and register to either
             dest, source = mod_reg_rm_to_dest_source(b1, cpu)
             cpu.execute(Operation.SUB, dest, source)
-            output.append(f"sub {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
+            output.append(f"sub {formatRegAddrInt(dest)}, {formatRegAddrInt(source)}")
             
         elif b1 >> 1 == 0b0010110: # SUB immediate from accumulator
             acc, value = data_to_accumulator(b1, cpu)
@@ -170,7 +166,7 @@ def parse(bytes: bytearray):
         elif b1 >> 2 == 0b001110: # CMP reg/memory and register
             dest, source = mod_reg_rm_to_dest_source(b1, cpu)
             cpu.execute(Operation.CMP, dest, source)
-            output.append(f"cmp {regOrStringToLow(dest)}, {regOrStringToLow(source)}")
+            output.append(f"cmp {formatRegAddrInt(dest)}, {formatRegAddrInt(source)}")
             
         elif b1 >> 1 == 0b0011110: # CMP immediate with accumulator
             acc, value = data_to_accumulator(b1, cpu)
